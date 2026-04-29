@@ -1,0 +1,17 @@
+﻿.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+cache/
+data/leads.sqlite
+data/*.sqlite
+data/*.sqlite-*
+output/*.xlsx
+output/archive/
+output/raw_discovery_*.xlsx
+output/leads_output_*.xlsx
+
+.DS_Store
+Thumbs.db

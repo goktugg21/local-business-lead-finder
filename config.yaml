@@ -1,0 +1,91 @@
+countries:
+  - Netherlands
+cities:
+  - Amsterdam
+  - Rotterdam
+  - Utrecht
+  - Den Haag
+  - Haarlem
+  - Leiden
+sectors:
+  - klusbedrijf
+  - aannemer
+  - schilder
+  - loodgieter
+  - schoonmaakbedrijf
+  - dakdekker
+  - stukadoor
+  - nagelstudio
+  - schoonheidssalon
+  - barbershop
+query_presets:
+  home_services:
+    sectors:
+      - klusbedrijf
+      - aannemer
+      - schilder
+      - loodgieter
+      - dakdekker
+      - stukadoor
+      - timmerman
+      - tegelzetter
+      - badkamer renovatie
+      - keuken renovatie
+      - renovatiebedrijf
+      - schoonmaakbedrijf
+      - glazenwasser
+      - verhuisbedrijf
+  beauty:
+    sectors:
+      - nagelstudio
+      - schoonheidssalon
+      - barbershop
+      - kapper
+      - massage salon
+      - brow bar
+      - lash studio
+max_results_per_query: 20
+max_business_candidates: 250
+max_audit_queue: 80
+final_top_n: 25
+min_rating: 4.0
+preferred_min_reviews: 15
+preferred_max_reviews: 250
+max_reviews_soft: 350
+max_reviews_hard: 800
+strong_threshold: 65
+candidate_threshold: 45
+run_pagespeed: false
+pagespeed_top_n: 30
+pagespeed_strategy: mobile
+request_delay_seconds: 1.0
+exclude_terms:
+  - bank
+  - insurance
+  - verzekeringen
+  - clinic
+  - kliniek
+  - doctor
+  - dentist
+  - tandarts
+  - huisarts
+  - hospital
+  - ziekenhuis
+  - advocaat
+  - lawyer
+  - makelaar
+  - real estate
+  - hotel
+  - school
+  - university
+  - gemeente
+  - government
+  - supermarket
+  - albert heijn
+  - jumbo
+  - lidl
+  - hema
+  - kruidvat
+  - action
+  - restaurant
+  - cafe
