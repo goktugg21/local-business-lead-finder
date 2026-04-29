@@ -228,16 +228,43 @@ def _outreach_decision(
 
 def is_audited(lead: dict[str, Any]) -> bool:
     audit = lead.get("website_audit", {}) or {}
-    pagespeed = lead.get("pagespeed", {}) or {}
-    has_audit_marker = bool(
-        lead.get("audit_status") == "audited"
-        or lead.get("audited_at")
-        or audit.get("audit_status") == "audited"
-        or audit.get("audited_at")
-    )
-    if has_audit_marker and _has_real_audit_observation(audit, pagespeed, lead):
+
+    if lead.get("audit_status") == "audited":
         return True
-    return _has_historical_audit_observation(audit, pagespeed, lead)
+    if audit.get("audit_status") == "audited":
+        return True
+    if lead.get("audited_at"):
+        return True
+    if audit.get("audited_at"):
+        return True
+
+    load_confidence = audit.get("load_confidence")
+    if (
+        load_confidence in {CONFIRMED_LOADED, CONFIRMED_DEAD, BLOCKED_OR_UNCERTAIN}
+        and audit.get("http_status_code") is not None
+    ):
+        return True
+
+    if audit.get("website_loads") is True and audit.get("final_url"):
+        return True
+
+    if (
+        load_confidence == BLOCKED_OR_UNCERTAIN
+        and audit.get("audit_error_type") in {
+            "timeout",
+            "ssl_error",
+            "connection_error",
+            "too_many_redirects",
+            "request_exception",
+        }
+    ):
+        return True
+
+    error_message = audit.get("audit_error_message") or audit.get("error") or ""
+    if load_confidence == BLOCKED_OR_UNCERTAIN and error_message:
+        return True
+
+    return False
 
 
 def _is_reachable(lead: dict[str, Any], audit: dict[str, Any]) -> bool:
@@ -339,6 +366,24 @@ def normalize_audit_for_scoring(lead: dict[str, Any]) -> None:
     confidence = _normalized_confidence(audit, lead)
     audit["load_confidence"] = confidence
 
+    status_code_raw = audit.get("http_status_code")
+    try:
+        status_code_int = int(status_code_raw) if status_code_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        status_code_int = None
+    if confidence == CONFIRMED_DEAD and status_code_int not in {404, 410}:
+        if performance is not None:
+            confidence = CONFIRMED_LOADED
+            audit["website_loads"] = True
+        else:
+            confidence = BLOCKED_OR_UNCERTAIN
+        audit["load_confidence"] = confidence
+
+    if confidence == BLOCKED_OR_UNCERTAIN and not audit.get("audit_error_type"):
+        existing_message = audit.get("audit_error_message") or audit.get("error") or ""
+        if existing_message:
+            audit["audit_error_type"] = _infer_uncertain_error_type(existing_message)
+
     website_loads = audit.get("website_loads")
     audit_error_type = str(audit.get("audit_error_type") or "").casefold()
     uncertain_error = (
@@ -381,6 +426,24 @@ def _normalized_confidence(audit: dict[str, Any], lead: dict[str, Any]) -> str:
     if status_code is not None and 200 <= status_code <= 399:
         return CONFIRMED_LOADED
     return "unknown"
+
+
+def _infer_uncertain_error_type(message: str) -> str:
+    text = str(message or "").casefold()
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "ssl" in text or "certificate" in text:
+        return "ssl_error"
+    if (
+        "nameresolutionerror" in text
+        or "failed to resolve" in text
+        or "getaddrinfo" in text
+        or "connection" in text
+    ):
+        return "connection_error"
+    if "redirect" in text:
+        return "too_many_redirects"
+    return "request_exception"
 
 
 def _clear_uncertain_audit_fields(audit: dict[str, Any]) -> None:

@@ -98,6 +98,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also create a timestamped Excel export after writing output/latest.xlsx.",
     )
+    parser.add_argument(
+        "--reaudit",
+        action="store_true",
+        help="Re-audit leads that are already audited or marked needs_browser_check.",
+    )
     return parser.parse_args()
 
 
@@ -139,10 +144,15 @@ def main() -> None:
 
     leads = prefilter_leads(leads, config)
     leads = sorted(leads, key=lambda lead: lead.get("business_fit_score", 0), reverse=True)
+    upsert_leads(leads)
+
     audit_limit = _audit_limit(config, args)
-    candidates_available = _audit_eligible(leads, config)
+    master_leads = load_leads()
+    candidates_available, scope_stats = _select_audit_candidates_from_master(
+        master_leads, config, args
+    )
     audit_candidates = candidates_available[: max(audit_limit, 0)]
-    _mark_audit_queue(leads, audit_candidates)
+    _mark_audit_queue_master(master_leads, audit_candidates)
     counts = Counter(lead.get("business_fit_status", "weak") for lead in leads)
     print(f"Rejected by hard rules: {sum(1 for lead in leads if lead.get('reject_reason'))}")
     print(
@@ -152,10 +162,14 @@ def main() -> None:
     print(f"Audit limit requested: {audit_limit}")
     print(f"Candidates available for audit: {len(candidates_available)}")
     print(f"Audit Queue: {len(audit_candidates)} leads.")
-
-    upsert_leads(leads)
+    print(f"Skipped (already audited): {scope_stats['skipped_already_audited']}")
+    print(f"Skipped (needs browser check): {scope_stats['skipped_browser_check']}")
+    print(f"Skipped (candidate type): {scope_stats['skipped_candidate_type']}")
+    print(f"Skipped (business fit): {scope_stats['skipped_business_fit']}")
+    print(f"Skipped (out of scope): {scope_stats['skipped_scope']}")
 
     if args.mode == "discover":
+        upsert_leads(master_leads)
         print("Discover mode selected: no website audit or PageSpeed calls.")
         output_path = export_latest()
         if args.archive_export:
@@ -212,8 +226,8 @@ def main() -> None:
         lead["score_version"] = SCORING_VERSION
 
     final_limit = args.final_limit or int(config.get("final_top_n", 25))
-    _mark_final_review(leads, final_limit)
-    upsert_leads(leads)
+    _mark_final_review(master_leads, final_limit)
+    upsert_leads(master_leads)
     final_review_count = _rescore_database(final_limit)
     print(f"Actually audited: {len(audit_candidates)}")
     print(f"Final review limit: {final_limit}")
@@ -300,6 +314,85 @@ def _mark_audit_queue(
         lead["audit_queue"] = id(lead) in queued_ids
 
 
+def _mark_audit_queue_master(
+    master_leads: list[dict[str, Any]],
+    audit_candidates: list[dict[str, Any]],
+) -> None:
+    candidate_ids = {id(lead) for lead in audit_candidates}
+    for lead in master_leads:
+        lead["audit_queue"] = id(lead) in candidate_ids
+
+
+def _select_audit_candidates_from_master(
+    master_leads: list[dict[str, Any]],
+    config: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    eligible_statuses = {"strong_candidate"}
+    if not bool(config.get("audit_only_strong_candidates", False)):
+        eligible_statuses.add("candidate")
+
+    excluded_candidate_types = {
+        "no_website_candidate",
+        "platform_candidate",
+        "weak_fit",
+        "skip",
+    }
+
+    cities = {str(c).casefold() for c in config.get("cities", []) if c}
+    sectors = {str(s).casefold() for s in config.get("sectors", []) if s}
+
+    stats = {
+        "skipped_already_audited": 0,
+        "skipped_browser_check": 0,
+        "skipped_candidate_type": 0,
+        "skipped_business_fit": 0,
+        "skipped_scope": 0,
+    }
+
+    filtered: list[dict[str, Any]] = []
+    for lead in master_leads:
+        if cities:
+            lead_city = str(lead.get("city") or "").casefold()
+            if lead_city not in cities:
+                stats["skipped_scope"] += 1
+                continue
+        if sectors:
+            lead_sector = str(lead.get("sector") or "").casefold()
+            if lead_sector not in sectors:
+                stats["skipped_scope"] += 1
+                continue
+
+        candidate_type = lead.get("candidate_type")
+        if candidate_type in excluded_candidate_types:
+            stats["skipped_candidate_type"] += 1
+            continue
+
+        status = lead.get("business_fit_status", lead.get("prefilter_status"))
+        if status not in eligible_statuses:
+            stats["skipped_business_fit"] += 1
+            continue
+
+        if not args.reaudit:
+            if is_audited(lead):
+                stats["skipped_already_audited"] += 1
+                continue
+            audit = lead.get("website_audit", {}) or {}
+            if audit.get("audit_status") == "needs_browser_check":
+                stats["skipped_browser_check"] += 1
+                continue
+
+        filtered.append(lead)
+
+    filtered.sort(
+        key=lambda lead: lead.get("business_fit_score", 0),
+        reverse=True,
+    )
+
+    max_business_candidates = int(config.get("max_business_candidates", 250))
+    return filtered[: max(max_business_candidates, 0)], stats
+
+
 def _pagespeed_enabled(args: argparse.Namespace) -> bool:
     return bool(args.pagespeed and args.mode != "discover")
 
@@ -358,6 +451,24 @@ def _audit_lead_cached(
     return audit
 
 
+def _infer_uncertain_error_type(message: str) -> str:
+    text = str(message or "").casefold()
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "ssl" in text or "certificate" in text:
+        return "ssl_error"
+    if (
+        "nameresolutionerror" in text
+        or "failed to resolve" in text
+        or "getaddrinfo" in text
+        or "connection" in text
+    ):
+        return "connection_error"
+    if "redirect" in text:
+        return "too_many_redirects"
+    return "request_exception"
+
+
 def _normalize_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
     email_value = audit.get("email_found")
     phone_value = audit.get("phone_found")
@@ -369,6 +480,13 @@ def _normalize_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
             load_confidence = "confirmed_dead"
         else:
             load_confidence = "blocked_or_uncertain"
+    if load_confidence == "confirmed_dead" and status_code not in {404, 410}:
+        if audit.get("pagespeed_performance_score") is not None:
+            # PageSpeed data means the site loaded for someone; trust that signal.
+            load_confidence = "confirmed_loaded"
+            website_loads = True
+        else:
+            load_confidence = "blocked_or_uncertain"
     if status_code in {404, 410} and website_loads is False:
         load_confidence = "confirmed_dead"
     if status_code in {401, 403, 406, 408, 429, 500, 502, 503, 504}:
@@ -376,13 +494,23 @@ def _normalize_audit_result(audit: dict[str, Any]) -> dict[str, Any]:
     if load_confidence == "unknown" and website_loads is False:
         load_confidence = "blocked_or_uncertain"
     blocked_or_uncertain = load_confidence == "blocked_or_uncertain"
+    audit_error_message = str(
+        audit.get("audit_error_message") or audit.get("error") or ""
+    )
+    audit_error_type = str(audit.get("audit_error_type") or "")
+    if (
+        load_confidence == "blocked_or_uncertain"
+        and not audit_error_type
+        and audit_error_message
+    ):
+        audit_error_type = _infer_uncertain_error_type(audit_error_message)
     normalized = {
         "website_exists": _optional_bool(audit.get("website_exists")),
         "website_loads": None if blocked_or_uncertain else website_loads,
         "final_url": str(audit.get("final_url") or ""),
         "uses_https": _optional_bool(audit.get("uses_https")),
-        "audit_error_type": str(audit.get("audit_error_type") or ""),
-        "audit_error_message": str(audit.get("audit_error_message") or audit.get("error") or ""),
+        "audit_error_type": audit_error_type,
+        "audit_error_message": audit_error_message,
         "http_status_code": status_code,
         "load_confidence": load_confidence,
         "email_found": None if blocked_or_uncertain else _optional_bool(email_value),
