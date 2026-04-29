@@ -121,6 +121,8 @@ def export_leads(
     summary_df = _summary_dataframe(leads, total_discovered=total_discovered)
     raw_df = _raw_dataframe(leads)
     business_fit_df = _lead_dataframe(_business_fit(leads), sort_by="business_fit_score")
+    no_website_df = _lead_dataframe(no_website_leads(leads), sort_by="business_fit_score")
+    platform_df = _lead_dataframe(platform_leads(leads), sort_by="business_fit_score")
     audit_queue_df = _lead_dataframe(_audit_queue(leads))
     audited_df = _lead_dataframe(_audited(leads), sort_by="final_opportunity_score")
     final_review_df = _lead_dataframe(_final_review(leads), sort_by="final_opportunity_score")
@@ -134,6 +136,8 @@ def export_leads(
         summary_df.to_excel(writer, index=False, sheet_name="Summary")
         raw_df.to_excel(writer, index=False, sheet_name="Raw Discovered")
         business_fit_df.to_excel(writer, index=False, sheet_name="Business Fit")
+        no_website_df.to_excel(writer, index=False, sheet_name="No Website Leads")
+        platform_df.to_excel(writer, index=False, sheet_name="Platform Leads")
         audit_queue_df.to_excel(writer, index=False, sheet_name="Audit Queue")
         audited_df.to_excel(writer, index=False, sheet_name="Audited Websites")
         final_review_df.to_excel(writer, index=False, sheet_name="Final Review")
@@ -237,6 +241,37 @@ def looks_fine_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if is_audited(lead)
         and lead.get("outreach_decision") == "looks_fine"
     ]
+
+
+def no_website_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for lead in leads:
+        candidate_type = lead.get("candidate_type")
+        if candidate_type in {"weak_fit", "skip"}:
+            continue
+        status = lead.get("business_fit_status", lead.get("prefilter_status"))
+        if status == "skip":
+            continue
+        if candidate_type == "no_website_candidate" or lead.get("website_type") == "missing":
+            selected.append(lead)
+    return selected
+
+
+def platform_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for lead in leads:
+        candidate_type = lead.get("candidate_type")
+        if candidate_type in {"weak_fit", "skip"}:
+            continue
+        status = lead.get("business_fit_status", lead.get("prefilter_status"))
+        if status == "skip":
+            continue
+        if candidate_type == "platform_candidate" or lead.get("website_type") in {
+            "social_media",
+            "booking_platform",
+        }:
+            selected.append(lead)
+    return selected
 
 
 def _needs_browser_check(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -362,6 +397,8 @@ def _summary_dataframe(
         {"metric": "truly_audited_leads", "value": len(audited_leads(leads))},
         {"metric": "send_candidates", "value": len(send_candidate_leads(leads))},
         {"metric": "audit queue", "value": sum(1 for lead in leads if lead.get("audit_queue"))},
+        {"metric": "no_website_leads", "value": len(no_website_leads(leads))},
+        {"metric": "platform_leads", "value": len(platform_leads(leads))},
     ]
 
     rows.extend({"metric": f"business fit: {status}", "value": count} for status, count in business_fit_counts.items())
