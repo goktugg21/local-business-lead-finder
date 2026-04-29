@@ -167,6 +167,7 @@ def main() -> None:
     print(f"Skipped (candidate type): {scope_stats['skipped_candidate_type']}")
     print(f"Skipped (business fit): {scope_stats['skipped_business_fit']}")
     print(f"Skipped (out of scope): {scope_stats['skipped_scope']}")
+    print(f"Skipped (outreach status): {scope_stats['skipped_outreach_status']}")
 
     if args.mode == "discover":
         upsert_leads(master_leads)
@@ -339,6 +340,8 @@ def _select_audit_candidates_from_master(
         "skip",
     }
 
+    contacted_statuses = {"contacted", "replied", "won", "lost"}
+
     cities = {str(c).casefold() for c in config.get("cities", []) if c}
     sectors = {str(s).casefold() for s in config.get("sectors", []) if s}
 
@@ -348,6 +351,7 @@ def _select_audit_candidates_from_master(
         "skipped_candidate_type": 0,
         "skipped_business_fit": 0,
         "skipped_scope": 0,
+        "skipped_outreach_status": 0,
     }
 
     filtered: list[dict[str, Any]] = []
@@ -371,6 +375,11 @@ def _select_audit_candidates_from_master(
         status = lead.get("business_fit_status", lead.get("prefilter_status"))
         if status not in eligible_statuses:
             stats["skipped_business_fit"] += 1
+            continue
+
+        outreach_status = str(lead.get("outreach_status") or "").strip().casefold()
+        if not args.reaudit and outreach_status in contacted_statuses:
+            stats["skipped_outreach_status"] += 1
             continue
 
         if not args.reaudit:
@@ -668,7 +677,7 @@ def _rebuild_legacy_import_if_available(lead: dict[str, Any]) -> dict[str, Any]:
         return lead
     source_file = Path(str(lead.get("legacy_source_file") or "legacy_import.xlsx"))
     rebuilt = normalize_imported_row(row, source_file)
-    for key in ("place_id", "website_domain"):
+    for key in ("place_id", "website_domain", "outreach_status"):
         if lead.get(key) and not rebuilt.get(key):
             rebuilt[key] = lead[key]
     return rebuilt

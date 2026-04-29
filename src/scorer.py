@@ -8,6 +8,14 @@ SCORING_VERSION = "pain_gate_v1_2026_04_28"
 CONFIRMED_DEAD = "confirmed_dead"
 CONFIRMED_LOADED = "confirmed_loaded"
 BLOCKED_OR_UNCERTAIN = "blocked_or_uncertain"
+OUTREACH_STATUSES = {"", "contacted", "replied", "won", "lost"}
+
+
+def _normalize_outreach_status(value: Any) -> str:
+    status = str(value or "").strip().casefold()
+    if status in OUTREACH_STATUSES:
+        return status
+    return ""
 UNCERTAIN_ERROR_TYPES = {
     "timeout",
     "blocked",
@@ -67,6 +75,7 @@ def score_lead(lead: dict[str, Any]) -> dict[str, Any]:
     lead["opportunity_score"] = lead["final_opportunity_score"]
     lead["priority"] = priority
     lead["outreach_decision"] = _outreach_decision(lead, audit, audited, pain_gate_pass, priority)
+    lead["outreach_status"] = _normalize_outreach_status(lead.get("outreach_status"))
     lead["reason"] = _reason(lead, audit, pagespeed, website_pain)
     lead["suggested_outreach_angle"] = _outreach_angle(lead, audit, website_pain)
     return lead
