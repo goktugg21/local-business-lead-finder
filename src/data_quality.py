@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 from src.utils import normalize_text
@@ -115,6 +116,13 @@ def evaluate_data_quality(
     if not normalized or len(normalized) < 3:
         return _result(normalized, "noise", "business name too short or empty")
 
+    if _has_emoji_like_symbol(raw_name):
+        return _result(
+            normalized,
+            "review",
+            "business name contains emoji/symbol (likely spammy GBP name)",
+        )
+
     if city and normalized == city:
         return _result(normalized, "noise", "business name equals city")
 
@@ -164,6 +172,15 @@ def evaluate_data_quality(
         )
 
     return _result(normalized, "clean", "")
+
+
+def _has_emoji_like_symbol(name: str) -> bool:
+    for ch in name:
+        if ord(ch) < 0x2600:
+            continue
+        if unicodedata.category(ch) in {"So", "Sk"}:
+            return True
+    return False
 
 
 def _result(normalized: str, status: str, reason: str) -> dict[str, Any]:

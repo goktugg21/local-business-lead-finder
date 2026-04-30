@@ -149,7 +149,7 @@ def export_leads(
     needs_browser_df = _lead_dataframe(_current_run_bucket(leads, "needs_browser_check"), sort_by="final_opportunity_score")
     visual_review_df = _lead_dataframe(_visual_review_leads(leads), sort_by="visual_pain_score")
     looks_fine_df = _lead_dataframe(_current_run_bucket(leads, "looks_fine"), sort_by="final_opportunity_score")
-    hard_skip_df = _lead_dataframe(_current_run_bucket(leads, "hard_skip"), sort_by="business_fit_score")
+    hard_skip_df = _lead_dataframe(_current_run_bucket(leads, "hard_skip", require_clean=False), sort_by="business_fit_score")
     audited_run_df = _lead_dataframe(_audit_queue_leads(leads), sort_by="final_opportunity_score")
     current_raw_df = _raw_dataframe([lead for lead in leads if lead.get("current_run")])
     current_candidates_df = _lead_dataframe(_current_run_business_fit(leads), sort_by="business_fit_score")
@@ -158,6 +158,7 @@ def export_leads(
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         readme_df.to_excel(writer, index=False, sheet_name="README")
         current_summary_df.to_excel(writer, index=False, sheet_name="Current Run Summary")
+        audited_run_df.to_excel(writer, index=False, sheet_name="Audited This Run")
         send_now_df.to_excel(writer, index=False, sheet_name="Send Now")
         no_website_df.to_excel(writer, index=False, sheet_name="No Website Offer")
         platform_offer_df.to_excel(writer, index=False, sheet_name="Platform Website Offer")
@@ -167,7 +168,6 @@ def export_leads(
         visual_review_df.to_excel(writer, index=False, sheet_name="Visual Review")
         looks_fine_df.to_excel(writer, index=False, sheet_name="Looks Fine")
         hard_skip_df.to_excel(writer, index=False, sheet_name="Hard Skip")
-        audited_run_df.to_excel(writer, index=False, sheet_name="Audited This Run")
         current_raw_df.to_excel(writer, index=False, sheet_name="Current Run - Raw")
         current_candidates_df.to_excel(writer, index=False, sheet_name="Current Run - Candidates")
         all_db_df.to_excel(writer, index=False, sheet_name="All Database")
@@ -179,6 +179,10 @@ def export_leads(
 
 
 def _decision_bucket(lead: dict[str, Any]) -> str:
+    quality_status = lead.get("data_quality_status")
+    if quality_status in {"review", "noise"}:
+        return "data_quality_review"
+
     candidate_type = lead.get("candidate_type")
     business_fit = lead.get("business_fit_status", lead.get("prefilter_status"))
     audit = lead.get("website_audit", {}) or {}
@@ -253,8 +257,19 @@ def _outreach_priority(lead: dict[str, Any]) -> str:
     return "skip"
 
 
-def _current_run_bucket(leads: list[dict[str, Any]], bucket: str) -> list[dict[str, Any]]:
-    return [lead for lead in leads if lead.get("current_run") and _decision_bucket(lead) == bucket]
+def _current_run_bucket(
+    leads: list[dict[str, Any]],
+    bucket: str,
+    *,
+    require_clean: bool = True,
+) -> list[dict[str, Any]]:
+    return [
+        lead
+        for lead in leads
+        if lead.get("current_run")
+        and _decision_bucket(lead) == bucket
+        and (not require_clean or lead.get("data_quality_status") == "clean")
+    ]
 
 
 def _audit_queue_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:

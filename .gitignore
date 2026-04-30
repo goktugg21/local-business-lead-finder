@@ -15,3 +15,6 @@ output/leads_output_*.xlsx
 
 .DS_Store
 Thumbs.db
+
+*.zip
+*.log

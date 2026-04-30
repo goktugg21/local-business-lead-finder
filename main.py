@@ -105,6 +105,11 @@ def parse_args() -> argparse.Namespace:
         help="Re-audit leads that are already audited or marked needs_browser_check.",
     )
     parser.add_argument(
+        "--audit-global-backlog",
+        action="store_true",
+        help="Audit historical-DB leads matching the current scope, not just current_run discoveries.",
+    )
+    parser.add_argument(
         "--visual-audit",
         action="store_true",
         help="Run a headless-browser visual audit on top current-run custom websites that have load_confidence=confirmed_loaded.",
@@ -180,7 +185,8 @@ def main() -> None:
     print(f"Skipped (business fit): {scope_stats['skipped_business_fit']}")
     print(f"Skipped (out of scope): {scope_stats['skipped_scope']}")
     print(f"Skipped (outreach status): {scope_stats['skipped_outreach_status']}")
-    print(f"Skipped (data quality): {scope_stats['skipped_data_quality']}")
+    print(f"Skipped (data quality not clean): {scope_stats['skipped_data_quality']}")
+    print(f"Skipped (not current run): {scope_stats['skipped_not_current_run']}")
 
     if args.mode == "discover":
         upsert_leads(master_leads)
@@ -240,7 +246,7 @@ def main() -> None:
         lead["score_version"] = SCORING_VERSION
 
     if args.visual_audit:
-        _run_visual_audit(master_leads, args.visual_limit)
+        _run_visual_audit(audit_candidates, args.visual_limit)
 
     final_limit = args.final_limit or int(config.get("final_top_n", 25))
     _mark_final_review(master_leads, final_limit)
@@ -341,13 +347,11 @@ def _mark_audit_queue_master(
 
 
 def _select_visual_candidates(
-    master_leads: list[dict[str, Any]],
+    audited_this_run: list[dict[str, Any]],
     limit: int,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
-    for lead in master_leads:
-        if not lead.get("current_run"):
-            continue
+    for lead in audited_this_run:
         if lead.get("candidate_type") != "redesign_candidate":
             continue
         if lead.get("data_quality_status") != "clean":
@@ -363,8 +367,8 @@ def _select_visual_candidates(
     return candidates[: max(limit, 0)]
 
 
-def _run_visual_audit(master_leads: list[dict[str, Any]], visual_limit: int) -> None:
-    candidates = _select_visual_candidates(master_leads, visual_limit)
+def _run_visual_audit(audited_this_run: list[dict[str, Any]], visual_limit: int) -> None:
+    candidates = _select_visual_candidates(audited_this_run, visual_limit)
     auditor = BrowserVisualAuditor()
     if not auditor.playwright_available:
         print(
@@ -414,7 +418,10 @@ def _select_audit_candidates_from_master(
         "skipped_scope": 0,
         "skipped_outreach_status": 0,
         "skipped_data_quality": 0,
+        "skipped_not_current_run": 0,
     }
+
+    audit_global_backlog = bool(getattr(args, "audit_global_backlog", False))
 
     filtered: list[dict[str, Any]] = []
     for lead in master_leads:
@@ -429,7 +436,11 @@ def _select_audit_candidates_from_master(
                 stats["skipped_scope"] += 1
                 continue
 
-        if lead.get("data_quality_status") == "noise":
+        if not audit_global_backlog and not lead.get("current_run"):
+            stats["skipped_not_current_run"] += 1
+            continue
+
+        if lead.get("data_quality_status") != "clean":
             stats["skipped_data_quality"] += 1
             continue
 
@@ -683,19 +694,28 @@ def _print_summary(
     for priority, count in sorted(priority_counts.items()):
         print(f"{priority}: {count}")
 
+    audited_this_run_clean = [
+        lead
+        for lead in leads
+        if lead.get("audit_queue")
+        and lead.get("data_quality_status") == "clean"
+        and is_audited(lead)
+    ]
     top = sorted(
-        exported_audited_leads,
+        audited_this_run_clean,
         key=lambda lead: lead.get("opportunity_score", 0),
         reverse=True,
     )[:5]
+    print("")
     if top:
-        print("")
-        print("Top audited leads:")
+        print("Top audited this run:")
         for lead in top:
             print(
                 f"- {lead.get('opportunity_score')} | {lead.get('priority')} | "
                 f"{lead.get('business_name')} | {lead.get('city')} | {lead.get('sector')}"
             )
+    else:
+        print("No leads audited this run.")
 
 
 def _run_database_command(args: argparse.Namespace) -> bool:

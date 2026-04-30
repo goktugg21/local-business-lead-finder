@@ -80,6 +80,7 @@ CLI overrides:
 - `--limit 50`: cap the current audit run size.
 - `--pagespeed`: force PageSpeed for selected audited candidates.
 - `--reaudit`: re-audit leads that are already audited or marked needs_browser_check.
+- `--audit-global-backlog`: also consider historical-DB leads (not just current_run discoveries) that match the current city/sector scope. Default behavior audits only the current run's discoveries.
 - `--visual-audit`: run a Playwright headless-browser audit on top current-run custom websites where the HTTP audit confirmed loaded. Requires Playwright + Chromium (see step 2).
 - `--visual-limit 10`: cap the number of visual audits per run (default 10).
 

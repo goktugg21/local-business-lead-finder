@@ -231,6 +231,8 @@ def _outreach_decision(
     pain_gate_pass: bool,
     priority: str,
 ) -> str:
+    if lead.get("data_quality_status") in {"review", "noise"}:
+        return "skip"
     reachable = _is_reachable(lead, audit)
     if audited and audit.get("load_confidence") == BLOCKED_OR_UNCERTAIN:
         return "manual_review"
