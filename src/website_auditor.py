@@ -117,15 +117,15 @@ class WebsiteAuditor:
                 result["audit_error_message"] = f"Unexpected HTTP status {response.status_code}"
                 self._clear_uncertain_observations(result)
                 return result
-        except requests.Timeout as exc:
+        except requests.exceptions.Timeout as exc:
             return self._uncertain_failure(result, "timeout", exc)
-        except requests.SSLError as exc:
+        except requests.exceptions.SSLError as exc:
             return self._uncertain_failure(result, "ssl_error", exc)
-        except requests.ConnectionError as exc:
+        except requests.exceptions.ConnectionError as exc:
             return self._uncertain_failure(result, "connection_error", exc)
-        except requests.TooManyRedirects as exc:
+        except requests.exceptions.TooManyRedirects as exc:
             return self._uncertain_failure(result, "too_many_redirects", exc)
-        except requests.RequestException as exc:
+        except requests.exceptions.RequestException as exc:
             return self._uncertain_failure(result, "request_exception", exc)
 
         soup = BeautifulSoup(response.text, "html.parser")
