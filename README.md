@@ -32,6 +32,14 @@ Never commit `.env`.
 pip install -r requirements.txt
 ```
 
+The optional `--visual-audit` flag drives a Playwright headless-browser audit. Playwright is in `requirements.txt`, but `pip` does not install the Chromium binary. After the pip install, run this once:
+
+```bash
+python -m playwright install chromium
+```
+
+If Playwright or Chromium is missing, `--visual-audit` will gracefully mark each visual audit as `skipped` with `browser_error_type=playwright_not_installed` and the rest of the pipeline still runs.
+
 ## 3. Run
 
 ```bash
@@ -71,6 +79,9 @@ CLI overrides:
 - `--final-limit 25`: cap the final review shortlist.
 - `--limit 50`: cap the current audit run size.
 - `--pagespeed`: force PageSpeed for selected audited candidates.
+- `--reaudit`: re-audit leads that are already audited or marked needs_browser_check.
+- `--visual-audit`: run a Playwright headless-browser audit on top current-run custom websites where the HTTP audit confirmed loaded. Requires Playwright + Chromium (see step 2).
+- `--visual-limit 10`: cap the number of visual audits per run (default 10).
 
 Maintenance commands:
 

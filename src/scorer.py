@@ -46,12 +46,17 @@ BEAUTY_SECTORS = {
 
 def score_lead(lead: dict[str, Any]) -> dict[str, Any]:
     normalize_audit_for_scoring(lead)
+    _ensure_data_quality(lead)
     audit = lead.get("website_audit", {}) or {}
     pagespeed = lead.get("pagespeed", {}) or {}
     audited = is_audited(lead)
 
     business_fit = _clamp(_number(lead.get("business_fit_score", lead.get("prefilter_score"))), 0, 100)
     website_pain = _website_pain_score(lead, audit, pagespeed)
+    visual = lead.get("visual_audit", {}) or {}
+    visual_pain = _number(visual.get("visual_pain_score"))
+    if visual_pain >= 40 and lead.get("data_quality_status") == "clean":
+        website_pain = _clamp(website_pain + 15, 0, 100)
     reachability = _reachability_score(lead, audit)
     final_score = round((business_fit * 0.35) + (website_pain * 0.45) + (reachability * 0.20))
     pain_gate_pass, pain_gate_reason = _pain_gate(lead, audit, pagespeed, website_pain)
@@ -206,6 +211,9 @@ def _pain_gate(
         reasons.append("no form and no clear CTA")
     if website_pain_score >= 55:
         reasons.append("website pain score >= 55")
+    visual = lead.get("visual_audit", {}) or {}
+    if _number(visual.get("visual_pain_score")) >= 25 and lead.get("data_quality_status") == "clean":
+        reasons.append("visual website pain")
 
     if reasons:
         if uncertain_reason:
@@ -363,6 +371,41 @@ def _clamp(value: float | int, minimum: int, maximum: int) -> int:
 def _sentence(parts: list[str]) -> str:
     text = ", ".join(parts)
     return text[:1].upper() + text[1:] + "."
+
+
+def _ensure_data_quality(lead: dict[str, Any]) -> None:
+    from src.data_quality import evaluate_data_quality
+    quality = evaluate_data_quality(lead)
+    lead["data_quality_status"] = quality["data_quality_status"]
+    lead["data_quality_reason"] = quality["data_quality_reason"]
+    lead["normalized_business_name"] = quality["normalized_business_name"]
+    if quality["data_quality_status"] == "noise":
+        if lead.get("business_fit_status") != "skip":
+            lead["business_fit_status"] = "skip"
+        lead["prefilter_status"] = "skip"
+        lead["candidate_type"] = "skip"
+        if not lead.get("reject_reason"):
+            lead["reject_reason"] = quality["data_quality_reason"] or "data quality noise"
+
+    if quality["data_quality_status"] in {"review", "noise"}:
+        existing = lead.get("visual_audit")
+        if existing and existing.get("visual_audit_status") != "skipped":
+            lead["visual_audit"] = {
+                "visual_audit_status": "skipped",
+                "browser_error_type": "data_quality_not_clean",
+                "browser_error_message": "",
+                "browser_loads": None,
+                "desktop_screenshot_path": "",
+                "mobile_screenshot_path": "",
+                "mobile_has_horizontal_scroll": None,
+                "above_fold_text_length": None,
+                "above_fold_cta_visible": None,
+                "above_fold_phone_visible": None,
+                "above_fold_form_visible": None,
+                "visual_pain_score": None,
+                "visual_pain_reasons": ["visual audit skipped: data_quality_not_clean"],
+                "visual_audited_at": existing.get("visual_audited_at") or "",
+            }
 
 
 def normalize_audit_for_scoring(lead: dict[str, Any]) -> None:

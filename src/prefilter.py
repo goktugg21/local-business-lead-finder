@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+from src.data_quality import evaluate_data_quality
 from src.scorer import HIGH_VALUE_SECTORS
 from src.utils import normalize_text
 
@@ -145,6 +146,18 @@ def prefilter_leads(leads: list[dict], config: dict) -> list[dict]:
         lead["prefilter_reasons"] = lead["business_fit_reasons"]
         lead["candidate_type"] = candidate_type
         lead["website_type"] = website_type
+
+        quality = evaluate_data_quality(lead, config)
+        lead["data_quality_status"] = quality["data_quality_status"]
+        lead["data_quality_reason"] = quality["data_quality_reason"]
+        lead["normalized_business_name"] = quality["normalized_business_name"]
+        if quality["data_quality_status"] == "noise":
+            lead["business_fit_status"] = "skip"
+            lead["prefilter_status"] = "skip"
+            lead["candidate_type"] = "skip"
+            if not lead.get("reject_reason"):
+                lead["reject_reason"] = quality["data_quality_reason"]
+
         filtered.append(lead)
 
     return filtered

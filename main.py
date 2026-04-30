@@ -28,6 +28,7 @@ from src.prefilter import prefilter_leads
 from src.scorer import score_lead
 from src.scorer import is_audited
 from src.utils import cache_key, normalize_url_for_key, read_json, write_json
+from src.visual_auditor import BrowserVisualAuditor
 from src.website_auditor import WebsiteAuditor
 
 
@@ -103,6 +104,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Re-audit leads that are already audited or marked needs_browser_check.",
     )
+    parser.add_argument(
+        "--visual-audit",
+        action="store_true",
+        help="Run a headless-browser visual audit on top current-run custom websites that have load_confidence=confirmed_loaded.",
+    )
+    parser.add_argument(
+        "--visual-limit",
+        type=int,
+        default=10,
+        help="Maximum number of visual audits per run (default: 10).",
+    )
     return parser.parse_args()
 
 
@@ -168,6 +180,7 @@ def main() -> None:
     print(f"Skipped (business fit): {scope_stats['skipped_business_fit']}")
     print(f"Skipped (out of scope): {scope_stats['skipped_scope']}")
     print(f"Skipped (outreach status): {scope_stats['skipped_outreach_status']}")
+    print(f"Skipped (data quality): {scope_stats['skipped_data_quality']}")
 
     if args.mode == "discover":
         upsert_leads(master_leads)
@@ -225,6 +238,9 @@ def main() -> None:
 
         score_lead(lead)
         lead["score_version"] = SCORING_VERSION
+
+    if args.visual_audit:
+        _run_visual_audit(master_leads, args.visual_limit)
 
     final_limit = args.final_limit or int(config.get("final_top_n", 25))
     _mark_final_review(master_leads, final_limit)
@@ -324,6 +340,51 @@ def _mark_audit_queue_master(
         lead["audit_queue"] = id(lead) in candidate_ids
 
 
+def _select_visual_candidates(
+    master_leads: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for lead in master_leads:
+        if not lead.get("current_run"):
+            continue
+        if lead.get("candidate_type") != "redesign_candidate":
+            continue
+        if lead.get("data_quality_status") != "clean":
+            continue
+        audit = lead.get("website_audit", {}) or {}
+        if audit.get("load_confidence") != "confirmed_loaded":
+            continue
+        visual = lead.get("visual_audit", {}) or {}
+        if visual.get("visual_audit_status") == "audited":
+            continue
+        candidates.append(lead)
+    candidates.sort(key=lambda lead: lead.get("business_fit_score", 0), reverse=True)
+    return candidates[: max(limit, 0)]
+
+
+def _run_visual_audit(master_leads: list[dict[str, Any]], visual_limit: int) -> None:
+    candidates = _select_visual_candidates(master_leads, visual_limit)
+    auditor = BrowserVisualAuditor()
+    if not auditor.playwright_available:
+        print(
+            "Visual audit skipped: Playwright is not installed. "
+            "Install with `pip install playwright` and `playwright install chromium`."
+        )
+        for lead in candidates:
+            lead["visual_audit"] = auditor.audit(lead, lead.get("website_audit", {}) or {})
+        print(f"Visual audit candidates marked as skipped: {len(candidates)}")
+        return
+
+    print(f"Running visual audit on {len(candidates)} custom-website leads.")
+    for index, lead in enumerate(candidates, start=1):
+        name = lead.get("business_name") or "Unknown business"
+        print(f"  [visual {index}/{len(candidates)}] {name}")
+        audit = lead.get("website_audit", {}) or {}
+        lead["visual_audit"] = auditor.audit(lead, audit)
+        score_lead(lead)
+
+
 def _select_audit_candidates_from_master(
     master_leads: list[dict[str, Any]],
     config: dict[str, Any],
@@ -352,6 +413,7 @@ def _select_audit_candidates_from_master(
         "skipped_business_fit": 0,
         "skipped_scope": 0,
         "skipped_outreach_status": 0,
+        "skipped_data_quality": 0,
     }
 
     filtered: list[dict[str, Any]] = []
@@ -366,6 +428,10 @@ def _select_audit_candidates_from_master(
             if lead_sector not in sectors:
                 stats["skipped_scope"] += 1
                 continue
+
+        if lead.get("data_quality_status") == "noise":
+            stats["skipped_data_quality"] += 1
+            continue
 
         candidate_type = lead.get("candidate_type")
         if candidate_type in excluded_candidate_types:
