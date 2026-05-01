@@ -124,7 +124,39 @@ Start small while testing, for example one city and one sector, then expand once
 
 Google Places API and PageSpeed Insights API usage may cost money or count against quotas. Start with small city/sector lists, enable billing alerts, and set quotas in Google Cloud.
 
-## 6. Cache behavior
+## 6. Local verification
+
+A small pytest suite plus the workbook verifier guard the export pipeline. Install dev dependencies once:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Then run, in order:
+
+```bash
+python -m compileall .
+python -m pytest -q
+python scripts/verify_workbook.py --run-log CITY_run.log --expected-city "City Name"
+```
+
+Replace `CITY_run.log` with the actual log filename your last pipeline run produced (e.g. `eindhoven_run.log`) and `"City Name"` with the matching city (e.g. `"Eindhoven"`). Both placeholders are required — do not type the angle-bracket forms literally. The run log and city must match the workbook currently in `output/latest.xlsx`; if they don't, the strict checks will fail.
+
+You can run all three steps via the wrapper:
+
+```bash
+python scripts/run_local_checks.py
+```
+
+That runs `compileall`, `pytest`, and (if `output/latest.xlsx` exists) `verify_workbook.py` without strict log/city assertions. To run the strict variant in one command, pass the same flags through:
+
+```bash
+python scripts/run_local_checks.py --run-log amsterdam_run.log --expected-city "Amsterdam"
+```
+
+`--expected-city` is only meaningful together with `--run-log`; passing it alone will fail with a friendly error.
+
+## 7. Cache behavior
 
 Places responses are cached by query in `cache/places/`.
 
