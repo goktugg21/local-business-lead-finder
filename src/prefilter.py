@@ -31,8 +31,21 @@ DIRECTORY_DOMAINS = [
     "google.com/maps",
     "maps.google",
     "g.page",
+    "nlcompanies",
+    "cylex",
+    "drimble",
+    "oozo",
+    "bedrijvenpagina",
+    "allebedrijvenin",
 ]
-MARKETPLACE_DOMAINS = ["marktplaats", "werkspot", "trustoo", "offerteadviseur"]
+MARKETPLACE_DOMAINS = [
+    "marktplaats",
+    "werkspot",
+    "trustoo",
+    "offerteadviseur",
+    "solvari",
+    "homedeal",
+]
 
 DEFAULT_EXCLUDE_TERMS = [
     "doctor",
@@ -214,8 +227,8 @@ def _reject_reason(
         return "rating below minimum"
     if review_count > int(config.get("max_reviews_hard", 800)):
         return "too many reviews"
-    if website_type in {"directory", "marketplace"}:
-        return f"{website_type} page only"
+    if website_type == "marketplace":
+        return "marketplace page only"
     if website_type == "missing" and not has_phone:
         return "no website and no phone/contact path"
     return ""
@@ -261,7 +274,7 @@ def _website_score(website_url: str, website_type: str, reasons: list[str]) -> i
     if website_type == "missing":
         reasons.append("missing website")
         return 0
-    if website_type in {"social_media", "booking_platform"}:
+    if website_type in {"social_media", "booking_platform", "directory"}:
         reasons.append(f"{website_type} instead of website")
         return 0
     if website_type == "custom_website":
@@ -327,7 +340,7 @@ def _candidate_type(status: str, website_type: str) -> str:
         return "weak_fit"
     if website_type == "missing":
         return "no_website_candidate"
-    if website_type in {"social_media", "booking_platform"}:
+    if website_type in {"social_media", "booking_platform", "directory"}:
         return "platform_candidate"
     if website_type == "custom_website":
         return "redesign_candidate"

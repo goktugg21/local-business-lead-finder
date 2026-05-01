@@ -66,6 +66,20 @@ FAILURE_INDICATORS = (
     "exit=1",
 )
 
+THIRD_PARTY_DIRECTORY_DOMAINS = (
+    "nlcompanies.org",
+    "telefoonboek.nl",
+    "openingstijden.nl",
+    "cylex.nl",
+    "drimble.nl",
+    "oozo.nl",
+    "bedrijvenpagina.nl",
+    "allebedrijvenin.nl",
+    "solvari.nl",
+    "werkspot.nl",
+    "homedeal.nl",
+)
+
 
 def _check(condition: bool, ok_msg: str, fail_msg: str) -> int:
     if condition:
@@ -171,6 +185,48 @@ def main() -> int:
             f"{sheet} {label} ({len(df)} rows)",
             f"{sheet} has {len(bad)} rows with banned priority {sorted(banned)}",
         )
+
+    print()
+    print("Send Now third-party-directory check:")
+
+    def _scan_third_party(frame: pd.DataFrame) -> list[tuple[str, int]]:
+        urls = frame["website_url"].astype(str).str.casefold()
+        offenders: list[tuple[str, int]] = []
+        for domain in THIRD_PARTY_DIRECTORY_DOMAINS:
+            mask = urls.str.contains(domain, regex=False)
+            if mask.any():
+                offenders.append((domain, int(mask.sum())))
+        return offenders
+
+    send_now_df = pd.read_excel(xl, sheet_name="Send Now")
+    if send_now_df.empty:
+        print("  ----  Send Now sheet: empty")
+    else:
+        offenders = _scan_third_party(send_now_df)
+        failures += _check(
+            not offenders,
+            f"no third-party directory domains in Send Now sheet ({len(send_now_df)} rows)",
+            f"Send Now sheet contains third-party directory domains: {offenders}",
+        )
+
+    all_db_df = pd.read_excel(xl, sheet_name="All Database")
+    if all_db_df.empty:
+        print("  ----  All Database: empty")
+    else:
+        send_now_mask = (
+            (all_db_df["outreach_decision"].astype(str) == "send_now")
+            | (all_db_df["decision_bucket"].astype(str) == "send_now")
+        )
+        send_now_db = all_db_df[send_now_mask]
+        if send_now_db.empty:
+            print("  ----  All Database send_now: empty")
+        else:
+            db_offenders = _scan_third_party(send_now_db)
+            failures += _check(
+                not db_offenders,
+                f"no third-party directory domains in DB send_now rows ({len(send_now_db)} rows)",
+                f"DB send_now rows contain third-party directory domains: {db_offenders}",
+            )
 
     print()
     print("All Database decision_bucket <-> outreach_decision consistency:")

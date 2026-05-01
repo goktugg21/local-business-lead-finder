@@ -810,6 +810,10 @@ def _rescore_database(final_limit: int) -> int:
     rescored: list[dict[str, Any]] = []
     for lead in leads:
         rebuilt = _rebuild_legacy_import_if_available(lead)
+        # Refresh website_type/candidate_type/business_fit so classification
+        # changes (e.g., new third-party directory domains) propagate during
+        # rescore-all without requiring re-discovery.
+        prefilter_leads([rebuilt], {})
         score_lead(rebuilt)
         rebuilt["score_version"] = SCORING_VERSION
         rescored.append(rebuilt)

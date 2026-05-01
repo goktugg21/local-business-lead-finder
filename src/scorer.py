@@ -245,7 +245,7 @@ def _outreach_decision(
     website_type = lead.get("website_type")
     if candidate_type == "no_website_candidate" or website_type == "missing":
         return "no_website_offer"
-    if candidate_type == "platform_candidate" or website_type in {"social_media", "booking_platform"}:
+    if candidate_type == "platform_candidate" or website_type in {"social_media", "booking_platform", "directory"}:
         return "platform_website_offer"
     reachable = _is_reachable(lead, audit)
     if audited and audit.get("load_confidence") == BLOCKED_OR_UNCERTAIN:

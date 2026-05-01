@@ -195,7 +195,7 @@ def _decision_bucket(lead: dict[str, Any]) -> str:
 
     if candidate_type == "no_website_candidate" or website_type == "missing":
         return "no_website_offer"
-    if candidate_type == "platform_candidate" or website_type in {"social_media", "booking_platform"}:
+    if candidate_type == "platform_candidate" or website_type in {"social_media", "booking_platform", "directory"}:
         return "platform_offer"
 
     if not is_audited(lead):
@@ -403,6 +403,7 @@ def platform_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if candidate_type == "platform_candidate" or lead.get("website_type") in {
             "social_media",
             "booking_platform",
+            "directory",
         }:
             selected.append(lead)
     return selected
