@@ -56,12 +56,40 @@ ACTIONABLE_SHEETS = (
 A_B_PRIORITIES = {"A - Write First", "B - Good Lead"}
 
 
+FAILURE_INDICATORS = (
+    "Traceback",
+    "UnicodeEncodeError",
+    "NativeCommandError",
+    "error: unrecognized arguments",
+    "main.py: error:",
+    "Exited with",
+    "exit=1",
+)
+
+
 def _check(condition: bool, ok_msg: str, fail_msg: str) -> int:
     if condition:
         print(f"  OK    {ok_msg}")
         return 0
     print(f"  FAIL  {fail_msg}")
     return 1
+
+
+def _read_text_flexible(path: Path) -> str:
+    raw = path.read_bytes()
+    if raw.startswith(b"\xff\xfe"):
+        return raw.decode("utf-16-le", errors="replace").lstrip("﻿").replace("\r\n", "\n")
+    if raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16-be", errors="replace").lstrip("﻿").replace("\r\n", "\n")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig", errors="replace").replace("\r\n", "\n")
+    for encoding in ("utf-8", "cp1254", "cp1252", "latin-1"):
+        try:
+            text = raw.decode(encoding)
+            return text.replace("\r\n", "\n")
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 def main() -> int:
@@ -71,6 +99,11 @@ def main() -> int:
         type=Path,
         default=None,
         help="Pipeline run log (e.g. utrecht_run.log). If provided, check that every '[x/N] Auditing ...' name is in Audited This Run.",
+    )
+    parser.add_argument(
+        "--expected-city",
+        default=None,
+        help="If provided, Current Run - Raw and (non-empty) Audited This Run city columns must contain only this city.",
     )
     args = parser.parse_args()
 
@@ -193,12 +226,64 @@ def main() -> int:
             print(f"  FAIL  log not found: {args.run_log}")
             failures += 1
         else:
-            with args.run_log.open(encoding="utf-8", errors="replace") as fp:
-                log_text = fp.read()
+            log_text = _read_text_flexible(args.run_log)
+
+            crash_indicators = [ind for ind in FAILURE_INDICATORS if ind in log_text]
+            failures += _check(
+                not crash_indicators,
+                "log contains no crash/error indicators",
+                f"log contains failure indicator(s): {crash_indicators}",
+            )
+
+            failures += _check(
+                "Done." in log_text,
+                "log contains 'Done.'",
+                "log is missing 'Done.' marker (pipeline did not finish)",
+            )
+
+            only_match = re.search(r"^Auditing only (\d+) leads\.\s*$", log_text, re.MULTILINE)
+            actually_match = re.search(r"^Actually audited:\s*(\d+)\s*$", log_text, re.MULTILINE)
             attempts = re.findall(r"^\[\d+/\d+\] Auditing (.+)$", log_text, re.MULTILINE)
-            visual_attempts = re.findall(r"^  \[visual \d+/\d+\] (.+)$", log_text, re.MULTILINE)
+            visual_attempts = re.findall(r"^\s*\[visual \d+/\d+\] (.+)$", log_text, re.MULTILINE)
+
+            n_only = int(only_match.group(1)) if only_match else None
+            n_actually = int(actually_match.group(1)) if actually_match else None
+
+            failures += _check(
+                n_only is not None,
+                f"parsed 'Auditing only N leads.' -> N={n_only}",
+                "log is missing 'Auditing only N leads.' line",
+            )
+            failures += _check(
+                n_actually is not None,
+                f"parsed 'Actually audited: M' -> M={n_actually}",
+                "log is missing 'Actually audited: M' line",
+            )
+
+            if n_only is not None:
+                failures += _check(
+                    len(attempts) == n_only,
+                    f"parsed [x/N] Auditing lines == N ({len(attempts)} == {n_only})",
+                    f"parsed {len(attempts)} [x/N] Auditing lines but log says N={n_only}",
+                )
+
+            if n_only is not None and n_actually is not None:
+                failures += _check(
+                    n_only == n_actually,
+                    f"'Auditing only' N == 'Actually audited' M ({n_only})",
+                    f"'Auditing only' N={n_only} != 'Actually audited' M={n_actually}",
+                )
+
             ath_df = pd.read_excel(xl, sheet_name="Audited This Run")
             ath_names = set(ath_df["business_name"].astype(str)) if not ath_df.empty else set()
+
+            if n_only is not None:
+                failures += _check(
+                    len(ath_df) == n_only,
+                    f"Audited This Run sheet rows == N ({len(ath_df)} == {n_only})",
+                    f"Audited This Run sheet has {len(ath_df)} rows but log says N={n_only}",
+                )
+
             missing = [name for name in attempts if name not in ath_names]
             failures += _check(
                 not missing,
@@ -234,6 +319,30 @@ def main() -> int:
                         f"load_conf={audit.get('load_confidence')}  "
                         f"audit_status={audit.get('audit_status')}"
                     )
+
+    if args.expected_city is not None:
+        print()
+        print(f"Expected-city check ({args.expected_city!r}):")
+        cr_raw = pd.read_excel(xl, sheet_name="Current Run - Raw")
+        if cr_raw.empty:
+            print("  ----  Current Run - Raw: empty")
+        else:
+            other = cr_raw[cr_raw["city"].astype(str) != args.expected_city]
+            failures += _check(
+                other.empty,
+                f"Current Run - Raw all city == {args.expected_city!r} ({len(cr_raw)} rows)",
+                f"Current Run - Raw has {len(other)} rows with city != {args.expected_city!r}: {sorted(set(other['city'].astype(str)))}",
+            )
+        ath_check = pd.read_excel(xl, sheet_name="Audited This Run")
+        if ath_check.empty:
+            print("  ----  Audited This Run: empty (skipping city check)")
+        else:
+            other_ath = ath_check[ath_check["city"].astype(str) != args.expected_city]
+            failures += _check(
+                other_ath.empty,
+                f"Audited This Run all city == {args.expected_city!r} ({len(ath_check)} rows)",
+                f"Audited This Run has {len(other_ath)} rows with city != {args.expected_city!r}",
+            )
 
     print()
     if failures == 0:
