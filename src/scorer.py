@@ -63,6 +63,14 @@ def score_lead(lead: dict[str, Any]) -> dict[str, Any]:
     priority = _priority(_clamp(final_score, 0, 100))
     if not pain_gate_pass and priority in {"A - Write First", "B - Good Lead"}:
         priority = "C - Maybe Later"
+    if lead.get("data_quality_status") in {"review", "noise"}:
+        priority = "Q - Data Quality Review"
+    elif (
+        lead.get("business_fit_status") == "skip"
+        or lead.get("candidate_type") in {"weak_fit", "skip"}
+        or lead.get("reject_reason")
+    ):
+        priority = "D - Skip"
 
     lead["business_fit_score"] = business_fit
     lead["website_pain_score"] = website_pain
@@ -233,6 +241,12 @@ def _outreach_decision(
 ) -> str:
     if lead.get("data_quality_status") in {"review", "noise"}:
         return "skip"
+    candidate_type = lead.get("candidate_type")
+    website_type = lead.get("website_type")
+    if candidate_type == "no_website_candidate" or website_type == "missing":
+        return "no_website_offer"
+    if candidate_type == "platform_candidate" or website_type in {"social_media", "booking_platform"}:
+        return "platform_website_offer"
     reachable = _is_reachable(lead, audit)
     if audited and audit.get("load_confidence") == BLOCKED_OR_UNCERTAIN:
         return "manual_review"

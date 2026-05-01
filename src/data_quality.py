@@ -123,6 +123,13 @@ def evaluate_data_quality(
             "business name contains emoji/symbol (likely spammy GBP name)",
         )
 
+    if _has_non_latin_letters(raw_name):
+        return _result(
+            normalized,
+            "review",
+            "business name contains non-Latin letters (likely garbled/spammy GBP name)",
+        )
+
     if city and normalized == city:
         return _result(normalized, "noise", "business name equals city")
 
@@ -180,6 +187,22 @@ def _has_emoji_like_symbol(name: str) -> bool:
             continue
         if unicodedata.category(ch) in {"So", "Sk"}:
             return True
+    return False
+
+
+def _has_non_latin_letters(name: str) -> bool:
+    for ch in name:
+        if not ch.isalpha():
+            continue
+        try:
+            uname = unicodedata.name(ch, "")
+        except ValueError:
+            continue
+        if not uname:
+            continue
+        if uname.startswith("LATIN "):
+            continue
+        return True
     return False
 
 

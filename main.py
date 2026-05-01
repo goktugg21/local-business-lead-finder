@@ -11,6 +11,17 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+# Reconfigure stdout/stderr to UTF-8 with replacement so the pipeline never
+# crashes on non-Latin business names (Greek, Turkish, etc.) when the host's
+# default codec (cp1252/cp1254 on Windows) cannot encode them.
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from src.exporter import audited_leads, export_leads, send_candidate_leads
 from src.importer import import_history, normalize_imported_row
 from src.storage import (
@@ -674,26 +685,10 @@ def _print_summary(
     pagespeed_run_count: int,
     current_run_audited: int | None = None,
 ) -> None:
-    priority_counts: dict[str, int] = {}
+    from src.exporter import _decision_bucket
+
     exported_audited_leads = audited_leads(leads)
-    email_ready_count = len(send_candidate_leads(leads))
-    for lead in exported_audited_leads:
-        priority = lead.get("priority", "Unknown")
-        priority_counts[priority] = priority_counts.get(priority, 0) + 1
-
-    print("")
-    print("Done.")
-    print(f"Exported: {output_path}")
-    print(f"Total DB leads: {len(leads)}")
-    print(f"Current run leads: {sum(1 for lead in leads if lead.get('current_run'))}")
-    if current_run_audited is not None:
-        print(f"Actually audited this run: {current_run_audited}")
-    print(f"Truly audited leads: {len(exported_audited_leads)}")
-    print(f"PageSpeed calls made: {pagespeed_run_count}")
-    print(f"Email-ready leads: {email_ready_count}")
-    for priority, count in sorted(priority_counts.items()):
-        print(f"{priority}: {count}")
-
+    current_run_leads = [lead for lead in leads if lead.get("current_run")]
     audited_this_run_clean = [
         lead
         for lead in leads
@@ -701,6 +696,47 @@ def _print_summary(
         and lead.get("data_quality_status") == "clean"
         and is_audited(lead)
     ]
+    bucket_counts = Counter(_decision_bucket(lead) for lead in current_run_leads)
+
+    print("")
+    print("Done.")
+    print(f"Exported: {output_path}")
+
+    print("")
+    print("Current run summary:")
+    print(f"  Current run leads: {len(current_run_leads)}")
+    if current_run_audited is not None:
+        print(f"  Actually audited this run: {current_run_audited}")
+    print(f"  Audited this run (clean): {len(audited_this_run_clean)}")
+    for bucket in (
+        "send_now",
+        "no_website_offer",
+        "platform_offer",
+        "manual_review",
+        "needs_browser_check",
+        "looks_fine",
+        "hard_skip",
+        "data_quality_review",
+    ):
+        print(f"  {bucket}: {bucket_counts.get(bucket, 0)}")
+    current_priority_counts = Counter(
+        lead.get("priority", "Unknown") for lead in audited_this_run_clean
+    )
+    for priority, count in sorted(current_priority_counts.items()):
+        print(f"  audited this run priority {priority}: {count}")
+
+    print("")
+    print("All audited database:")
+    print(f"  Total DB leads: {len(leads)}")
+    print(f"  Truly audited (DB-wide): {len(exported_audited_leads)}")
+    print(f"  PageSpeed calls made: {pagespeed_run_count}")
+    print(f"  Email-ready (DB-wide): {len(send_candidate_leads(leads))}")
+    db_priority_counts = Counter(
+        lead.get("priority", "Unknown") for lead in exported_audited_leads
+    )
+    for priority, count in sorted(db_priority_counts.items()):
+        print(f"  DB-wide audited priority {priority}: {count}")
+
     top = sorted(
         audited_this_run_clean,
         key=lambda lead: lead.get("opportunity_score", 0),
