@@ -187,6 +187,38 @@ def main() -> int:
         )
 
     print()
+    print("Visual Review exclusivity check:")
+    vr_df = pd.read_excel(xl, sheet_name="Visual Review")
+    if vr_df.empty:
+        print("  ----  Visual Review: empty")
+    else:
+        vr_names = set(vr_df["business_name"].astype(str))
+        overlap_sheets = (
+            "Send Now",
+            "No Website Offer",
+            "Platform Website Offer",
+            "Manual Review",
+            "Needs Browser Check",
+            "Looks Fine",
+            "Hard Skip",
+            "Data Quality Review",
+        )
+        overlaps: list[tuple[str, int]] = []
+        for sheet in overlap_sheets:
+            df = pd.read_excel(xl, sheet_name=sheet)
+            if df.empty:
+                continue
+            other_names = set(df["business_name"].astype(str))
+            common = vr_names & other_names
+            if common:
+                overlaps.append((sheet, len(common)))
+        failures += _check(
+            not overlaps,
+            f"Visual Review has no overlap with action sheets ({len(vr_df)} rows)",
+            f"Visual Review overlaps with: {overlaps}",
+        )
+
+    print()
     print("Send Now third-party-directory check:")
 
     def _scan_third_party(frame: pd.DataFrame) -> list[tuple[str, int]]:

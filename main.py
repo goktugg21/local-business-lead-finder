@@ -714,6 +714,7 @@ def _print_summary(
         "platform_offer",
         "manual_review",
         "needs_browser_check",
+        "visual_review",
         "looks_fine",
         "hard_skip",
         "data_quality_review",

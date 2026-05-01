@@ -209,6 +209,18 @@ def _decision_bucket(lead: dict[str, Any]) -> str:
         return "send_now"
     if decision == "manual_review":
         return "manual_review"
+
+    # Visual Review intercepts looks_fine leads where the headless-browser
+    # audit found visible pain. Exclusive bucket: such a lead does not also
+    # appear in Looks Fine or any other action sheet.
+    visual = lead.get("visual_audit", {}) or {}
+    if (
+        decision == "looks_fine"
+        and visual.get("visual_audit_status") == "audited"
+        and int(visual.get("visual_pain_score") or 0) > 0
+    ):
+        return "visual_review"
+
     if decision == "looks_fine":
         return "looks_fine"
     return "manual_review"
@@ -286,22 +298,7 @@ def _data_quality_review_leads(leads: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def _visual_review_leads(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    for lead in leads:
-        if not lead.get("current_run"):
-            continue
-        if lead.get("data_quality_status") != "clean":
-            continue
-        visual = lead.get("visual_audit", {}) or {}
-        if visual.get("visual_audit_status") != "audited":
-            continue
-        visual_pain = int(visual.get("visual_pain_score") or 0)
-        if visual_pain >= 20:
-            selected.append(lead)
-            continue
-        if lead.get("outreach_decision") == "looks_fine" and visual_pain > 0:
-            selected.append(lead)
-    return selected
+    return _current_run_bucket(leads, "visual_review")
 
 
 def _current_run_business_fit(leads: list[dict[str, Any]]) -> list[dict[str, Any]]:
